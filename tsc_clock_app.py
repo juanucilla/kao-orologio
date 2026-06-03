@@ -501,9 +501,10 @@ def install_autostart():
     ) % (SHORTCUT_PATH, pythonw, THIS_SCRIPT,
          os.path.dirname(THIS_SCRIPT))
 
-    result = subprocess.run(["powershell", "-Command", ps_cmd],
-                             capture_output=True, text=True,
-                             creationflags=subprocess.CREATE_NO_WINDOW)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from win_subprocess import run_hidden
+    result = run_hidden(["powershell", "-Command", ps_cmd],
+                        capture_output=True, text=True)
     if result.returncode == 0:
         print("  Autostart installato: %s" % SHORTCUT_PATH)
     else:

@@ -44,11 +44,12 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 # ── WMI helpers ──────────────────────────────────────────────────────────────
 def _wmi_query(ns: str, cls: str) -> list[dict]:
-    import subprocess, re
+    import re, os, sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from win_subprocess import run_hidden
     cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
            "Get-WmiObject -Namespace '%s' -Class %s | ConvertTo-Json -Depth 2" % (ns, cls)]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
-                       creationflags=subprocess.CREATE_NO_WINDOW)
+    r = run_hidden(cmd, capture_output=True, text=True, timeout=10)
     if r.returncode != 0 or not r.stdout.strip():
         return []
     txt = r.stdout.strip()

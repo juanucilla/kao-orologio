@@ -10,6 +10,7 @@ import threading, time, datetime, json, os, sys, subprocess, math
 import psutil
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from win_subprocess import run_hidden
 from tsc_engine import TSCEngine
 from power_meter import PowerMeter
 from process_power import ProcessPowerMeter
@@ -52,12 +53,11 @@ def _brightness_poll_loop(interval_s: float = 5.0):
     global _brightness_cache
     while True:
         try:
-            r = subprocess.run(
+            r = run_hidden(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                  "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness)"
                  ".CurrentBrightness"],
-                capture_output=True, text=True, timeout=6,
-                creationflags=subprocess.CREATE_NO_WINDOW)
+                capture_output=True, text=True, timeout=6)
             v = r.stdout.strip()
             with _brightness_lock:
                 _brightness_cache = int(v) if v.isdigit() else None

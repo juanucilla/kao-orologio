@@ -42,8 +42,9 @@ def make_shortcut(lnk_path: str, target: str, args: str,
         "$s.Description = '%s';"
         "$s.Save()"
     ) % (lnk_path, target, args, APP_DIR, window_style, desc)
-    subprocess.run(["powershell", "-Command", ps], capture_output=True,
-                   creationflags=subprocess.CREATE_NO_WINDOW)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from win_subprocess import run_hidden
+    run_hidden(["powershell", "-Command", ps], capture_output=True)
 
 
 def remove_shortcut(lnk_path: str):
