@@ -56,7 +56,8 @@ def _brightness_poll_loop(interval_s: float = 5.0):
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                  "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness)"
                  ".CurrentBrightness"],
-                capture_output=True, text=True, timeout=6)
+                capture_output=True, text=True, timeout=6,
+                creationflags=subprocess.CREATE_NO_WINDOW)
             v = r.stdout.strip()
             with _brightness_lock:
                 _brightness_cache = int(v) if v.isdigit() else None

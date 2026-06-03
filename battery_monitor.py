@@ -47,7 +47,8 @@ def _wmi_query(ns: str, cls: str) -> list[dict]:
     import subprocess, re
     cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
            "Get-WmiObject -Namespace '%s' -Class %s | ConvertTo-Json -Depth 2" % (ns, cls)]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
     if r.returncode != 0 or not r.stdout.strip():
         return []
     txt = r.stdout.strip()

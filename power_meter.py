@@ -200,7 +200,8 @@ class PowerMeter:
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                  "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness)"
                  ".CurrentBrightness"],
-                capture_output=True, text=True, timeout=3)
+                capture_output=True, text=True, timeout=3,
+                creationflags=subprocess.CREATE_NO_WINDOW)
             v = r.stdout.strip()
             return int(v) if v.isdigit() else 100
         except Exception:
