@@ -10,7 +10,6 @@ import threading, time, datetime, json, os, sys, subprocess, math
 import psutil
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from win_subprocess import run_hidden
 from tsc_engine import TSCEngine
 from power_meter import PowerMeter
 from process_power import ProcessPowerMeter
@@ -50,17 +49,16 @@ _brightness_cache: int | None = None
 _brightness_lock  = threading.Lock()
 
 def _brightness_poll_loop(interval_s: float = 5.0):
+    """Legge la luminosità via WMI COM (nessun subprocess)."""
     global _brightness_cache
     while True:
         try:
-            r = run_hidden(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness)"
-                 ".CurrentBrightness"],
-                capture_output=True, text=True, timeout=6)
-            v = r.stdout.strip()
-            with _brightness_lock:
-                _brightness_cache = int(v) if v.isdigit() else None
+            import win32com.client
+            svc = win32com.client.GetObject("winmgmts://./root/wmi")
+            for obj in svc.ExecQuery("SELECT CurrentBrightness FROM WmiMonitorBrightness"):
+                with _brightness_lock:
+                    _brightness_cache = int(obj.CurrentBrightness)
+                break
         except Exception:
             pass
         time.sleep(interval_s)

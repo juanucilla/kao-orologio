@@ -18,13 +18,10 @@ Metodi disponibili (in ordine di precisione):
   4. Tensione × corrente (futuro) — Richiederebbe driver RAPL/EMI.
 """
 
-import ctypes, ctypes.wintypes, time, threading, subprocess, os, sys
+import ctypes, ctypes.wintypes, time, threading
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 import psutil
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from win_subprocess import run_hidden
 
 
 # ─── Struttura Windows SystemBatteryState ─────────────────────────────────────
@@ -199,15 +196,13 @@ class PowerMeter:
     @staticmethod
     def _get_brightness() -> int:
         try:
-            r = run_hidden(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                 "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness)"
-                 ".CurrentBrightness"],
-                capture_output=True, text=True, timeout=3)
-            v = r.stdout.strip()
-            return int(v) if v.isdigit() else 100
+            import win32com.client
+            svc = win32com.client.GetObject("winmgmts://./root/wmi")
+            for obj in svc.ExecQuery("SELECT CurrentBrightness FROM WmiMonitorBrightness"):
+                return int(obj.CurrentBrightness)
         except Exception:
-            return 100
+            pass
+        return 100
 
     # ── Statistiche ───────────────────────────────────────────────────────────
     def avg_power_mw(self, last_n: int = 20) -> float:
