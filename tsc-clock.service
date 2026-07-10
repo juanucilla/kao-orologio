@@ -1,0 +1,24 @@
+[Unit]
+Description=Orologio TSC testimone (idle, always-on)
+After=network-online.target chronyd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user
+# Aspetta che chrony abbia agganciato NTP (offset < 10 ms, max ~30 s):
+# senza, il demone si ancora PRIMA dello step di boot del clock e il
+# drift riportato resta falsato di ~1 s fino al restart successivo
+# (osservato al reboot del 2026-07-11).
+ExecStartPre=/usr/bin/chronyc waitsync 30 0.01
+ExecStart=/usr/bin/python3 /home/ec2-user/tsc_clock_daemon.py
+Restart=always
+RestartSec=5
+Nice=19
+CPUSchedulingPolicy=idle
+RuntimeDirectory=tsc_clock
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
