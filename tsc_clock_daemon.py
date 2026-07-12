@@ -47,6 +47,15 @@ STATE_PATH = STATE_DIR / "state.json"
 REPORTS_PATH = Path(os.environ.get(
     "TSC_DAEMON_REPORTS", "/home/ec2-user/tsc_clock_outage_reports.jsonl"))
 REPORTS_MAX_BODY = 64 * 1024
+# Registro PERSISTENTE della deriva orologio↔sistema. Direttiva operativa
+# (2026-07-12): se l'orologio non è in linea col clock di sistema NON lo
+# si corregge e NON lo si riavvia — si REGISTRA soltanto. L'orologio
+# free-runna per tutta la vita del processo (per questo la nano è sempre
+# accesa: ogni riavvio azzererebbe l'ancora e romperebbe la continuità).
+DRIFT_LOG_PATH = Path(os.environ.get(
+    "TSC_DAEMON_DRIFT_LOG", "/home/ec2-user/tsc_clock_drift_log.jsonl"))
+DRIFT_LOG_EVERY_S = float(os.environ.get("TSC_DAEMON_DRIFT_LOG_EVERY_S",
+                                         "300"))
 
 _lock = threading.Lock()
 _payload: dict = {}
@@ -92,6 +101,19 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):  # noqa: N802  (firma imposta da BaseHTTPRequestHandler)
+        if self.path.startswith("/drift"):
+            # Storico della deriva registrata (mai corretta).
+            lines: list = []
+            try:
+                if DRIFT_LOG_PATH.exists():
+                    lines = DRIFT_LOG_PATH.read_text(
+                        encoding="utf-8").splitlines()[-50:]
+            except OSError:
+                pass
+            self._send_json({"count": len(lines),
+                             "drift": [json.loads(l) for l in lines
+                                       if l.strip()]})
+            return
         if self.path.startswith("/reports"):
             # Ultimi rapporti di irraggiungibilità ricevuti dai client.
             lines: list = []
@@ -164,6 +186,7 @@ def main() -> int:
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     seq = 0
+    last_drift_log = 0.0
     while True:
         seq += 1
         _seq = seq
@@ -174,6 +197,26 @@ def main() -> int:
             os.replace(tmp, STATE_PATH)
         except OSError as e:
             print(f"state write err: {e!r}", flush=True)
+        # Registro persistente della deriva: la divergenza dal clock di
+        # sistema NON viene mai corretta (nessun ri-ancoraggio, nessun
+        # riavvio) — viene scritta qui, per sempre, a cadenza fissa.
+        now_mono = time.monotonic()
+        if now_mono - last_drift_log >= DRIFT_LOG_EVERY_S:
+            last_drift_log = now_mono
+            try:
+                with DRIFT_LOG_PATH.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "ts_sys": datetime.now(
+                            timezone.utc).isoformat(),
+                        "ts_tsc": d["tsc_iso"],
+                        "drift_us": d["drift_us"],
+                        "freq_ghz": d["freq_ghz"],
+                        "boot_id": d["boot_id"],
+                        "daemon_started_at": d["started_at"],
+                        "seq": seq,
+                    }) + "\n")
+            except OSError as e:
+                print(f"drift log err: {e!r}", flush=True)
         # Log di vitalita' ogni ~10 minuti, non a ogni ciclo.
         if seq % max(1, int(600 / CICLO_S)) == 1:
             print(f"alive seq={seq} drift={d['drift_us']:+.1f}us "
