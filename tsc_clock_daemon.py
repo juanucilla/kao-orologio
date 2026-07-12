@@ -41,6 +41,12 @@ CICLO_S = float(os.environ.get("TSC_DAEMON_INTERVAL_S", "10"))
 HTTP_PORT = int(os.environ.get("TSC_DAEMON_PORT", "8080"))
 STATE_DIR = Path(os.environ.get("TSC_DAEMON_STATE_DIR", "/run/tsc_clock"))
 STATE_PATH = STATE_DIR / "state.json"
+# Registro PERSISTENTE (non /run) dei rapporti di irraggiungibilità che i
+# client inviano via POST quando l'orologio torna interrogabile: chi ha
+# fallito, da quando, quanti tentativi, con quali errori.
+REPORTS_PATH = Path(os.environ.get(
+    "TSC_DAEMON_REPORTS", "/home/ec2-user/tsc_clock_outage_reports.jsonl"))
+REPORTS_MAX_BODY = 64 * 1024
 
 _lock = threading.Lock()
 _payload: dict = {}
@@ -77,20 +83,68 @@ def _update_payload(clk: TSCClockAWS, started_at: float, seq: int) -> dict:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    def do_GET(self):  # noqa: N802  (firma imposta da BaseHTTPRequestHandler)
-        # Tempo FRESCO a ogni richiesta (tsc_time/sys_time sono letture
-        # locali a costo di nanosecondi), non lo snapshot del ciclo.
-        if _clk is not None:
-            body = json.dumps(
-                _update_payload(_clk, _started_at, _seq)).encode()
-        else:
-            with _lock:
-                body = json.dumps(_payload).encode()
-        self.send_response(200)
+    def _send_json(self, obj, status: int = 200) -> None:
+        body = json.dumps(obj).encode()
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self):  # noqa: N802  (firma imposta da BaseHTTPRequestHandler)
+        if self.path.startswith("/reports"):
+            # Ultimi rapporti di irraggiungibilità ricevuti dai client.
+            lines: list = []
+            try:
+                if REPORTS_PATH.exists():
+                    lines = REPORTS_PATH.read_text(
+                        encoding="utf-8").splitlines()[-20:]
+            except OSError:
+                pass
+            self._send_json({"count": len(lines),
+                             "reports": [json.loads(l) for l in lines
+                                         if l.strip()]})
+            return
+        # Tempo FRESCO a ogni richiesta (tsc_time/sys_time sono letture
+        # locali a costo di nanosecondi), non lo snapshot del ciclo.
+        if _clk is not None:
+            self._send_json(_update_payload(_clk, _started_at, _seq))
+        else:
+            with _lock:
+                self._send_json(dict(_payload))
+
+    def do_POST(self):  # noqa: N802
+        """Riceve il rapporto di un client che NON è riuscito a
+        interrogare l'orologio: perché, da quando, quanti tentativi, con
+        quale log di errori. Registrato con il timestamp dell'orologio
+        stesso (ora che è di nuovo interrogabile) e l'IP del mittente."""
+        try:
+            length = min(int(self.headers.get("Content-Length") or 0),
+                         REPORTS_MAX_BODY)
+            raw = self.rfile.read(length) if length else b""
+            try:
+                report = json.loads(raw.decode())
+            except (ValueError, UnicodeDecodeError):
+                report = {"_raw": raw.decode(errors="replace")[:2000]}
+            rec = {
+                "received_at": datetime.now(timezone.utc).isoformat(),
+                "received_at_tsc": (
+                    datetime.fromtimestamp(_clk.tsc_time(),
+                                           tz=timezone.utc).isoformat()
+                    if _clk is not None else None),
+                "client_ip": self.client_address[0],
+                "report": report,
+            }
+            with REPORTS_PATH.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(rec) + "\n")
+            print(f"outage report da {rec['client_ip']}: "
+                  f"source={report.get('source')} "
+                  f"attempts={report.get('attempts')} "
+                  f"first_fail={report.get('failed_first_at')}", flush=True)
+            self._send_json({"ok": True})
+        except Exception as e:  # mai far cadere il server per un report
+            print(f"report POST err: {e!r}", flush=True)
+            self._send_json({"ok": False}, status=500)
 
     def log_message(self, fmt, *args):  # silenzia l'access log
         pass
